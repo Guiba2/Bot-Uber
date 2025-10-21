@@ -21,14 +21,33 @@ async function initializeDriverLocation() {
       const axios = require('axios');
       const response = await axios.get('https://api.ipify.org?format=json');
       const publicIp = response.data.ip;
-      driverLocation = await geocodingService.getLocationFromIP(publicIp);
-      console.log('📍 Localização do motorista obtida via IP:', driverLocation);
+      const location = await geocodingService.getLocationFromIP(publicIp);
+      
+      if (location && location.latitude && location.longitude) {
+        driverLocation = location;
+        console.log('📍 Localização do motorista obtida via IP:', driverLocation);
+      } else {
+        throw new Error('Localização inválida retornada');
+      }
     } catch (error) {
       console.log('⚠️  Não foi possível obter localização automática do motorista');
-      driverLocation = { latitude: -23.5505, longitude: -46.6333 };
+      console.log('📍 Usando localização padrão (São Paulo, Brasil)');
+      driverLocation = { latitude: -23.5505, longitude: -46.6333, city: 'São Paulo', region: 'SP' };
     }
   } else {
-    driverLocation = await geocodingService.getLocationFromIP(driverIp);
+    try {
+      const location = await geocodingService.getLocationFromIP(driverIp);
+      if (location && location.latitude && location.longitude) {
+        driverLocation = location;
+        console.log('📍 Localização do motorista obtida via IP:', driverLocation);
+      } else {
+        throw new Error('Localização inválida retornada');
+      }
+    } catch (error) {
+      console.log('⚠️  Erro ao obter localização do IP fornecido');
+      console.log('📍 Usando localização padrão (São Paulo, Brasil)');
+      driverLocation = { latitude: -23.5505, longitude: -46.6333, city: 'São Paulo', region: 'SP' };
+    }
   }
 }
 
@@ -235,6 +254,8 @@ async function handleConfirmation(from, messageText) {
 async function handleSchedule(from, messageText) {
   const conversationState = storage.getConversationState(from);
   
+  const scheduledTime = parseScheduleTime(messageText);
+  
   const ride = storage.addRide({
     clientPhone: from,
     origin: conversationState.data.origin,
@@ -243,11 +264,64 @@ async function handleSchedule(from, messageText) {
     price: conversationState.data.price,
     status: RIDE_STATUS.SCHEDULED,
     scheduledFor: messageText,
+    scheduledTime: scheduledTime,
   });
+  
+  storage.addScheduledRide(from, {
+    ride,
+    origin: conversationState.data.origin,
+    destination: conversationState.data.destination,
+    route: conversationState.data.route,
+    price: conversationState.data.price,
+  }, scheduledTime);
   
   await sendMessage(from, `${MESSAGES.RIDE_SCHEDULED}\n\n📅 Data/Hora: ${messageText}`);
   
   storage.clearConversation(from);
+}
+
+function parseScheduleTime(text) {
+  const now = new Date();
+  const lowerText = text.toLowerCase();
+  
+  if (lowerText.includes('amanhã') || lowerText.includes('amanha')) {
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    
+    const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
+    if (timeMatch) {
+      tomorrow.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2]), 0, 0);
+      return tomorrow;
+    }
+    tomorrow.setHours(9, 0, 0, 0);
+    return tomorrow;
+  }
+  
+  if (lowerText.includes('hoje')) {
+    const today = new Date(now);
+    const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
+    if (timeMatch) {
+      today.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2]), 0, 0);
+      return today;
+    }
+  }
+  
+  const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
+  if (timeMatch) {
+    const scheduled = new Date(now);
+    const hour = parseInt(timeMatch[1]);
+    const minute = parseInt(timeMatch[2]);
+    scheduled.setHours(hour, minute, 0, 0);
+    
+    if (scheduled <= now) {
+      scheduled.setDate(scheduled.getDate() + 1);
+    }
+    return scheduled;
+  }
+  
+  const futureTime = new Date(now);
+  futureTime.setHours(now.getHours() + 2);
+  return futureTime;
 }
 
 async function notifyDriver(ride) {
@@ -290,13 +364,30 @@ async function sendMessage(to, text) {
 }
 
 function setupScheduledReminders() {
-  cron.schedule('*/5 * * * *', () => {
+  cron.schedule('*/5 * * * *', async () => {
     const scheduledRides = storage.getScheduledRides();
     const now = new Date();
     
-    scheduledRides.forEach(([phoneNumber, rideInfo]) => {
-      console.log(`⏰ Verificando lembretes agendados... (${scheduledRides.length} corridas)`);
-    });
+    if (scheduledRides.length > 0) {
+      console.log(`⏰ Verificando ${scheduledRides.length} corrida(s) agendada(s)...`);
+    }
+    
+    for (const [phoneNumber, rideInfo] of scheduledRides) {
+      const scheduledTime = new Date(rideInfo.scheduledTime);
+      const timeDiff = scheduledTime - now;
+      const oneHour = 60 * 60 * 1000;
+      
+      if (timeDiff <= 0) {
+        console.log(`🚗 Hora da corrida chegou para ${phoneNumber}`);
+        await sendMessage(phoneNumber, '🚗 Sua corrida agendada está chegando! O motorista foi notificado.');
+        await notifyDriver(rideInfo.rideData.ride);
+        storage.removeScheduledRide(phoneNumber);
+      } else if (timeDiff <= oneHour && timeDiff > (oneHour - 5 * 60 * 1000)) {
+        console.log(`⏰ Enviando lembrete de 1 hora para ${phoneNumber}`);
+        const reminderMsg = `⏰ *Lembrete de Corrida*\n\nSua corrida está agendada para daqui a ${Math.round(timeDiff / 60000)} minutos.\n\n📍 Origem: ${rideInfo.rideData.origin.address}\n📍 Destino: ${rideInfo.rideData.destination.address}\n💰 Valor: ${rideInfo.rideData.price.formatted}`;
+        await sendMessage(phoneNumber, reminderMsg);
+      }
+    }
   });
   
   console.log('⏰ Sistema de lembretes ativado (verifica a cada 5 minutos)');
