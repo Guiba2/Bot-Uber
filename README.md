@@ -76,7 +76,7 @@ Edite `src/config/constants.js` para ajustar:
 
 ```javascript
 PRICING: {
-  BASE_FARE: 5.00,        // Tarifa base
+   se
   PRICE_PER_KM: 2.50,      // Preço por km
   MINIMUM_FARE: 10.00,     // Valor mínimo
 }

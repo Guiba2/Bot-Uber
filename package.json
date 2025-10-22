@@ -14,6 +14,8 @@
     "@whiskeysockets/baileys": "^7.0.0-rc.6",
     "axios": "^1.12.2",
     "node-cron": "^4.2.1",
+    "opencage-api-client": "^2.0.1",
+    "openrouteservice-js": "^0.4.1",
     "pino": "^10.1.0",
     "qrcode-terminal": "^0.12.0"
   }
