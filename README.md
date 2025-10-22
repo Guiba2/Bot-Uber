@@ -6,11 +6,11 @@ Bot automático de WhatsApp para agendamento e gerenciamento de corridas de carr
 
 - ✅ Conexão com WhatsApp via @whiskeysockets/baileys
 - 📍 Detecção automática de localização compartilhada ou conversão de endereços
-- 🗺️ Integração com OpenCage Geocoding API
-- 🛣️ Cálculo de rotas com OpenRouteService Directions API
+- 🗺️ Geocoding com **OpenCage API** (via SDK oficial `opencage-api-client`)
+- 🛣️ Cálculo de rotas com **OpenRouteService API** (via SDK oficial `openrouteservice-js`)
 - 💰 Cálculo automático de preço baseado em distância
-- 📅 Sistema de agendamento de corridas
-- ⏰ Lembretes automáticos com node-cron
+- 📅 Sistema de agendamento de corridas com linguagem natural ("hoje 14h", "amanhã 18:30")
+- ⏰ Lembretes automáticos com node-cron (1 hora antes da corrida)
 - 🔔 Notificação automática para motorista
 - 💾 Armazenamento em memória (leve e rápido)
 
@@ -18,8 +18,8 @@ Bot automático de WhatsApp para agendamento e gerenciamento de corridas de carr
 
 1. **Node.js 20+** instalado
 2. **Chaves de API:**
-   - OpenCage Geocoding API: https://opencagedata.com/
-   - OpenRouteService API: https://openrouteservice.org/
+   - OpenCage Geocoding API: https://opencagedata.com/ (2.500 req/dia grátis)
+   - OpenRouteService API: https://openrouteservice.org/ (2.000 req/dia grátis)
 
 ## 🚀 Instalação
 
@@ -42,6 +42,15 @@ OPENROUTESERVICE_API_KEY=sua_chave_openrouteservice
 DRIVER_PHONE=5511999999999
 DRIVER_IP=auto
 ```
+
+## 🔑 Variáveis de Ambiente
+
+| Variável | Descrição | Obrigatória |
+|----------|-----------|-------------|
+| `OPENCAGE_API_KEY` | Chave de API do OpenCage para geocoding | ✅ Sim |
+| `OPENROUTESERVICE_API_KEY` | Chave de API do OpenRouteService para rotas | ✅ Sim |
+| `DRIVER_PHONE` | Número do motorista no formato internacional (ex: 5511999999999) | ✅ Sim |
+| `DRIVER_IP` | IP do motorista ou "auto" para detecção automática | ⚠️ Recomendado |
 
 ## ▶️ Como Usar
 
@@ -68,7 +77,8 @@ npm start
 5. **Cliente:** Envia destino
 6. **Bot:** Mostra resumo com distância, tempo e valor
 7. **Cliente:** "confirmar" ou "agendar"
-8. **Bot:** Confirma e notifica o motorista
+8. **Bot:** Se agendar, pergunta horário ("hoje 14:00" ou "amanhã 18:30")
+9. **Bot:** Confirma e notifica o motorista
 
 ## 💰 Configuração de Preços
 
@@ -76,7 +86,7 @@ Edite `src/config/constants.js` para ajustar:
 
 ```javascript
 PRICING: {
-   se
+  BASE_FARE: 5.00,         // Tarifa base
   PRICE_PER_KM: 2.50,      // Preço por km
   MINIMUM_FARE: 10.00,     // Valor mínimo
 }
@@ -91,8 +101,8 @@ PRICING: {
 │   ├── config/
 │   │   └── constants.js          # Configurações e constantes
 │   ├── services/
-│   │   ├── geocoding.js          # Serviço OpenCage
-│   │   ├── routing.js            # Serviço OpenRouteService
+│   │   ├── geocoding.js          # Serviço OpenCage (SDK oficial)
+│   │   ├── routing.js            # Serviço OpenRouteService (SDK oficial)
 │   │   └── pricing.js            # Cálculo de preços
 │   └── utils/
 │       └── storage.js            # Armazenamento em memória
@@ -101,19 +111,37 @@ PRICING: {
 └── README.md
 ```
 
+## 🔧 SDKs Utilizados
+
+Este projeto utiliza os **SDKs oficiais** das APIs para maior confiabilidade:
+
+- **`opencage-api-client`** (v2.0.1+): Cliente oficial do OpenCage para geocoding
+  - Lê a chave de API de `process.env.OPENCAGE_API_KEY`
+  - Tratamento automático de erros e rate limiting (código 402)
+  - Documentação: https://www.npmjs.com/package/opencage-api-client
+
+- **`openrouteservice-js`** (v0.4.1+): Cliente oficial do OpenRouteService para rotas
+  - Suporte completo para directions, isochrones, geocoding, etc.
+  - Tratamento de erros com códigos HTTP e internos
+  - Documentação: https://www.npmjs.com/package/openrouteservice-js
+
 ## ⚠️ Avisos Importantes
 
 - Este bot usa uma biblioteca não oficial do WhatsApp (@whiskeysockets/baileys)
 - O uso pode violar os termos de serviço do WhatsApp
 - Recomendado apenas para uso pessoal/testes
 - Para produção, considere usar a API oficial do WhatsApp Business
+- Os dados são armazenados em memória e serão perdidos ao reiniciar o bot
 
 ## 🔧 Suporte
 
 Para problemas ou dúvidas, verifique:
-- As chaves de API estão corretas
+- As chaves de API estão corretas no arquivo `.env`
 - O WhatsApp está conectado (QR Code escaneado)
 - As mensagens estão chegando no console
+- Limites diários das APIs não foram excedidos:
+  - OpenCage: 2.500 requisições/dia (plano gratuito)
+  - OpenRouteService: 2.000 requisições/dia (plano gratuito)
 
 ## 📝 Licença
 

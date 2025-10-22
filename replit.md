@@ -5,9 +5,11 @@
 A WhatsApp bot application for scheduling and managing car rides, built with Node.js. The bot handles ride requests through WhatsApp conversations, provides automatic geocoding of addresses, calculates routes and prices, and manages ride scheduling with automated reminders and driver notifications.
 
 ### Recent Changes (October 2025)
+- **Migrated to official SDKs**: Now using `opencage-api-client` and `openrouteservice-js` instead of direct HTTP calls
 - Implemented robust error handling for driver location with fallback to São Paulo coordinates
 - Added complete scheduling system with natural language parsing in Portuguese ("hoje 14:00", "amanhã 18:30")
 - Configured automated reminders (1 hour before ride) and driver notifications via node-cron
+- Enhanced error handling with specific messages for rate limiting, invalid keys, and route not found errors
 - All functionality tested and validated by architect review
 
 ## User Preferences
@@ -25,18 +27,18 @@ Preferred communication style: Simple, everyday language.
 **Design Rationale**: Baileys provides a lightweight, protocol-compliant WhatsApp client without requiring official API access. The state machine pattern ensures conversations follow a logical flow and prevents mixed-up user inputs.
 
 ### Location Services
-- **Geocoding**: OpenCage API converts text addresses to geographic coordinates
+- **Geocoding**: OpenCage API via official SDK (`opencage-api-client`) converts text addresses to geographic coordinates
 - **IP Geolocation**: Automatic driver location detection using ipapi.co service
 - **Coordinate Processing**: Handles both shared location messages and text-based addresses
 
-**Design Rationale**: Dual location input methods (GPS coordinates and text addresses) provide flexibility for different user preferences. OpenCage was chosen for its generous free tier and reliable geocoding accuracy.
+**Design Rationale**: Dual location input methods (GPS coordinates and text addresses) provide flexibility for different user preferences. OpenCage was chosen for its generous free tier and reliable geocoding accuracy. The official SDK provides better error handling and automatic API key management from environment variables.
 
 ### Routing & Pricing
-- **Route Calculation**: OpenRouteService API computes driving routes and distances
+- **Route Calculation**: OpenRouteService API via official SDK (`openrouteservice-js`) computes driving routes and distances
 - **Dynamic Pricing**: Distance-based fare calculation with configurable base fare, per-kilometer rate, and minimum fare
 - **Multi-leg Routes**: Supports driver-to-client and client-to-destination route calculations
 
-**Design Rationale**: Separating routing from geocoding allows for provider flexibility. The pricing model is simple but extensible, with all constants defined in configuration for easy adjustment.
+**Design Rationale**: Separating routing from geocoding allows for provider flexibility. The official SDK provides structured error responses (HTTP status codes and internal error codes), lazy initialization for better performance, and better TypeScript support. The pricing model is simple but extensible, with all constants defined in configuration for easy adjustment.
 
 ### Data Storage
 - **In-Memory Storage**: Custom `MemoryStorage` class using JavaScript Maps
@@ -79,7 +81,9 @@ Preferred communication style: Simple, everyday language.
 
 ### NPM Packages
 - **@whiskeysockets/baileys**: WhatsApp Web protocol implementation
-- **axios**: HTTP client for API requests
+- **opencage-api-client**: Official OpenCage Geocoding SDK (v2.0.1+)
+- **openrouteservice-js**: Official OpenRouteService SDK (v0.4.1+)
+- **axios**: HTTP client for IP geolocation requests
 - **node-cron**: Job scheduling for ride reminders
 - **pino**: High-performance logging
 - **qrcode-terminal**: QR code display in terminal

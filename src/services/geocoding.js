@@ -1,28 +1,21 @@
+const opencage = require('opencage-api-client');
 const axios = require('axios');
 
 class GeocodingService {
-  constructor() {
-    this.apiKey = process.env.OPENCAGE_API_KEY;
-    this.baseUrl = 'https://api.opencagedata.com/geocode/v1/json';
-  }
-
   async geocodeAddress(address) {
-    if (!this.apiKey) {
+    if (!process.env.OPENCAGE_API_KEY) {
       throw new Error('OPENCAGE_API_KEY não configurada');
     }
 
     try {
-      const response = await axios.get(this.baseUrl, {
-        params: {
-          q: address,
-          key: this.apiKey,
-          language: 'pt',
-          limit: 1,
-        },
+      const data = await opencage.geocode({
+        q: address,
+        language: 'pt',
+        limit: 1,
       });
 
-      if (response.data.results && response.data.results.length > 0) {
-        const result = response.data.results[0];
+      if (data.status.code === 200 && data.results.length > 0) {
+        const result = data.results[0];
         return {
           latitude: result.geometry.lat,
           longitude: result.geometry.lng,
@@ -33,6 +26,11 @@ class GeocodingService {
       return null;
     } catch (error) {
       console.error('Erro ao geocodificar endereço:', error.message);
+      
+      if (error.status && error.status.code === 402) {
+        console.error('Limite diário da API OpenCage atingido');
+      }
+      
       throw error;
     }
   }

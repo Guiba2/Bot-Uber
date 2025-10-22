@@ -1,34 +1,38 @@
-const axios = require('axios');
+const Openrouteservice = require('openrouteservice-js');
 
 class RoutingService {
   constructor() {
-    this.apiKey = process.env.OPENROUTESERVICE_API_KEY;
-    this.baseUrl = 'https://api.openrouteservice.org/v2/directions/driving-car';
+    this.directions = null;
+  }
+
+  getDirectionsClient() {
+    if (!this.directions) {
+      if (!process.env.OPENROUTESERVICE_API_KEY) {
+        throw new Error('OPENROUTESERVICE_API_KEY não configurada');
+      }
+
+      this.directions = new Openrouteservice.Directions({
+        api_key: process.env.OPENROUTESERVICE_API_KEY,
+      });
+    }
+
+    return this.directions;
   }
 
   async calculateRoute(originCoords, destinationCoords) {
-    if (!this.apiKey) {
-      throw new Error('OPENROUTESERVICE_API_KEY não configurada');
-    }
-
     try {
-      const response = await axios.post(
-        this.baseUrl,
-        {
-          coordinates: [
-            [originCoords.longitude, originCoords.latitude],
-            [destinationCoords.longitude, destinationCoords.latitude],
-          ],
-        },
-        {
-          headers: {
-            'Authorization': this.apiKey,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
+      const client = this.getDirectionsClient();
+      
+      const result = await client.calculate({
+        coordinates: [
+          [originCoords.longitude, originCoords.latitude],
+          [destinationCoords.longitude, destinationCoords.latitude],
+        ],
+        profile: 'driving-car',
+        format: 'json',
+      });
 
-      const route = response.data.routes[0];
+      const route = result.routes[0];
       const summary = route.summary;
 
       return {
@@ -37,6 +41,23 @@ class RoutingService {
       };
     } catch (error) {
       console.error('Erro ao calcular rota:', error.message);
+      
+      if (error.status) {
+        if (error.status === 401) {
+          console.error('API key inválida ou ausente');
+        } else if (error.status === 403) {
+          console.error('Limite de requisições da API OpenRouteService atingido');
+        } else if (error.status === 500) {
+          if (error.response) {
+            error.response.json().then(details => {
+              if (details.error && details.error.code === 2099) {
+                console.error('Rota não encontrada entre os pontos fornecidos');
+              }
+            }).catch(() => {});
+          }
+        }
+      }
+      
       throw error;
     }
   }
