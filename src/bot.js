@@ -1,4 +1,20 @@
-const makeWASocket = require('@whiskeysockets/baileys').default;
+import makeWASocket from '@whiskeysockets/baileys';
+import { DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
+import pino from 'pino';
+import qrcode from 'qrcode-terminal';
+import cron from 'node-cron';
+import axios from 'axios';
+
+import storage from './utils/storage.js';
+import geocodingService from './services/geocoding.js';
+import routingService from './services/routing.js';
+import pricingService from './services/pricing.js';
+import { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES } from './config/constants.js';
+
+import dotenv from 'dotenv';
+dotenv.config();
+
+/*const makeWASocket = require('@whiskeysockets/baileys').default;
 const { DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
@@ -9,7 +25,7 @@ const geocodingService = require('./services/geocoding');
 const routingService = require('./services/routing');
 const pricingService = require('./services/pricing');
 const { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES } = require('./config/constants');
-
+*/
 let sock;
 let driverLocation = null;
 
@@ -18,7 +34,6 @@ async function initializeDriverLocation() {
   
   if (driverIp === 'auto') {
     try {
-      const axios = require('axios');
       const response = await axios.get('https://api.ipify.org?format=json');
       const publicIp = response.data.ip;
       const location = await geocodingService.getLocationFromIP(publicIp);
@@ -89,35 +104,71 @@ async function handleMessage({ messages, type }) {
   if (type !== 'notify') return;
   
   for (const msg of messages) {
-    if (!msg.message || msg.key.fromMe) continue;
+    if (!msg.message) continue;
     
     const from = msg.key.remoteJid;
-    const messageText = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-    const hasLocation = msg.message.locationMessage;
+    const messageContent = msg.message;
+    
+    // Extrair texto da mensagem considerando diferentes tipos
+    const messageText = (
+      messageContent.conversation ||
+      messageContent.extendedTextMessage?.text ||
+      messageContent.buttonsResponseMessage?.selectedDisplayText ||
+      messageContent.listResponseMessage?.title ||
+      ''
+    ).trim();
+
+    // Verificar se é mensagem de localização
+    const hasLocation = Boolean(messageContent.locationMessage);
+    
+    // Ignorar mensagens vazias e do próprio bot
+    if (!messageText && !hasLocation) continue;
+    if (msg.key.fromMe) continue;
     
     console.log(`📩 Mensagem de ${from}: ${messageText || '[Localização]'}`);
     
     const conversationState = storage.getConversationState(from);
     
-    if (conversationState.state === CONVERSATION_STATES.IDLE) {
-      if (containsKeyword(messageText.toLowerCase(), KEYWORDS.START)) {
-        await sendMessage(from, MESSAGES.WELCOME);
-        storage.setConversationState(from, CONVERSATION_STATES.WAITING_ORIGIN);
+    try {
+      switch (conversationState.state) {
+        case CONVERSATION_STATES.IDLE:
+          if (containsKeyword(messageText.toLowerCase(), KEYWORDS.START)) {
+            await sendMessage(from, MESSAGES.WELCOME);
+            storage.setConversationState(from, CONVERSATION_STATES.WAITING_ORIGIN);
+          }
+          break;
+          
+        case CONVERSATION_STATES.WAITING_ORIGIN:
+          await handleOrigin(from, messageText, hasLocation, msg);
+          break;
+          
+        case CONVERSATION_STATES.WAITING_DESTINATION:
+          await handleDestination(from, messageText, hasLocation, msg);
+          break;
+          
+        case CONVERSATION_STATES.WAITING_CONFIRMATION:
+          await handleConfirmation(from, messageText);
+          break;
+          
+        case CONVERSATION_STATES.WAITING_SCHEDULE:
+          await handleSchedule(from, messageText);
+          break;
       }
-    } else if (conversationState.state === CONVERSATION_STATES.WAITING_ORIGIN) {
-      await handleOrigin(from, messageText, hasLocation, msg);
-    } else if (conversationState.state === CONVERSATION_STATES.WAITING_DESTINATION) {
-      await handleDestination(from, messageText, hasLocation, msg);
-    } else if (conversationState.state === CONVERSATION_STATES.WAITING_CONFIRMATION) {
-      await handleConfirmation(from, messageText);
-    } else if (conversationState.state === CONVERSATION_STATES.WAITING_SCHEDULE) {
-      await handleSchedule(from, messageText);
+    } catch (error) {
+      console.error(`Erro ao processar mensagem: ${error.message}`);
+      await sendMessage(from, MESSAGES.ERROR_GEOCODING);
+      storage.clearConversation(from);
     }
   }
 }
 
+// Melhorar a detecção de palavras-chave
 function containsKeyword(text, keywords) {
-  return keywords.some(keyword => text.includes(keyword));
+  if (!text) return false;
+  return keywords.some(keyword => 
+    text.includes(keyword) || 
+    text.replace(/\s+/g, '').includes(keyword.replace(/\s+/g, ''))
+  );
 }
 
 async function handleOrigin(from, messageText, hasLocation, msg) {
@@ -205,8 +256,7 @@ async function handleDestination(from, messageText, hasLocation, msg) {
       price: priceInfo,
     });
     
-    const summary = `
-📊 *Resumo da Corrida*
+    const summary = `📊 *Resumo da Corrida*
 
 📍 *Origem:* ${conversationState.data.origin.address}
 📍 *Destino:* ${destinationAddress}
@@ -215,10 +265,21 @@ async function handleDestination(from, messageText, hasLocation, msg) {
 ⏱️ *Tempo estimado:* ${routeInfo.clientToDestination.duration} minutos
 💰 *Valor:* ${priceInfo.formatted}
 
-${MESSAGES.ASK_SCHEDULE}
-    `.trim();
+Escolha uma opção:`.trim();
     
-    await sendMessage(from, summary);
+    const buttons = [
+      { buttonId: 'confirmar', buttonText: { displayText: 'Confirmar Agora' }, type: 1 },
+      { buttonId: 'agendar', buttonText: { displayText: 'Agendar Corrida' }, type: 1 },
+      { buttonId: 'cancelar', buttonText: { displayText: 'Cancelar' }, type: 1 }
+    ];
+
+    const buttonMessage = {
+      text: summary,
+      footer: buttons,
+      headerType: 1
+    };
+
+    await sock.sendMessage(from, buttonMessage);
   } catch (error) {
     console.error('Erro ao processar destino:', error);
     await sendMessage(from, MESSAGES.ERROR_ROUTING);
@@ -229,7 +290,7 @@ async function handleConfirmation(from, messageText) {
   const text = messageText.toLowerCase().trim();
   const conversationState = storage.getConversationState(from);
   
-  if (text === 'confirmar') {
+  if (text === 'confirmar' || text === 'confirmar agora') {
     const ride = storage.addRide({
       clientPhone: from,
       origin: conversationState.data.origin,
@@ -243,9 +304,12 @@ async function handleConfirmation(from, messageText) {
     await notifyDriver(ride);
     
     storage.clearConversation(from);
-  } else if (text === 'agendar') {
+  } else if (text === 'agendar' || text === 'agendar corrida') {
     storage.setConversationState(from, CONVERSATION_STATES.WAITING_SCHEDULE);
     await sendMessage(from, '📅 Para quando deseja agendar? (exemplo: "amanhã 14:00" ou "hoje 18:30")');
+  } else if (text === 'cancelar') {
+    await sendMessage(from, 'Corrida cancelada. Digite "uber" quando quiser solicitar uma nova corrida.');
+    storage.clearConversation(from);
   } else {
     await sendMessage(from, MESSAGES.INVALID_OPTION);
   }

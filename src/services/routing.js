@@ -1,4 +1,5 @@
-const Openrouteservice = require('openrouteservice-js');
+import Openrouteservice from 'openrouteservice-js';
+//const Openrouteservice = require('openrouteservice-js');
 
 class RoutingService {
   constructor() {
@@ -81,5 +82,5 @@ class RoutingService {
     }
   }
 }
-
-module.exports = new RoutingService();
+export default new RoutingService();
+//module.exports = new RoutingService();

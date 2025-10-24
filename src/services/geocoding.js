@@ -1,5 +1,7 @@
-const opencage = require('opencage-api-client');
-const axios = require('axios');
+import opencage from 'opencage-api-client';
+import axios from 'axios';
+//const opencage = require('opencage-api-client');
+//const axios = require('axios');
 
 class GeocodingService {
   async geocodeAddress(address) {
@@ -51,4 +53,5 @@ class GeocodingService {
   }
 }
 
-module.exports = new GeocodingService();
+export default new GeocodingService();
+

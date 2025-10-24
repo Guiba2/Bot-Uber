@@ -64,5 +64,7 @@ class MemoryStorage {
     this.scheduledRides.delete(phoneNumber);
   }
 }
+const storage = new MemoryStorage();
+export default storage;
 
-module.exports = new MemoryStorage();
+//module.exports = new MemoryStorage();

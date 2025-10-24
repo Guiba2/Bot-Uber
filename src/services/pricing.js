@@ -1,4 +1,5 @@
-const { PRICING } = require('../config/constants');
+import { PRICING } from '../config/constants.js';
+//const { PRICING } = require('../config/constants');
 
 class PricingService {
   calculatePrice(distanceKm) {
@@ -27,5 +28,5 @@ class PricingService {
     };
   }
 }
-
-module.exports = new PricingService();
+export default new PricingService;
+//module.exports = new PricingService();
