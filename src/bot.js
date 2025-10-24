@@ -9,23 +9,11 @@ import storage from './utils/storage.js';
 import geocodingService from './services/geocoding.js';
 import routingService from './services/routing.js';
 import pricingService from './services/pricing.js';
-import { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES } from './config/constants.js';
+import { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES, VEHICLE_TYPES } from './config/constants.js';
 
 import dotenv from 'dotenv';
 dotenv.config();
 
-/*const makeWASocket = require('@whiskeysockets/baileys').default;
-const { DisconnectReason, useMultiFileAuthState } = require('@whiskeysockets/baileys');
-const pino = require('pino');
-const qrcode = require('qrcode-terminal');
-const cron = require('node-cron');
-
-const storage = require('./utils/storage');
-const geocodingService = require('./services/geocoding');
-const routingService = require('./services/routing');
-const pricingService = require('./services/pricing');
-const { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES } = require('./config/constants');
-*/
 let sock;
 let driverLocation = null;
 
@@ -109,7 +97,6 @@ async function handleMessage({ messages, type }) {
     const from = msg.key.remoteJid;
     const messageContent = msg.message;
     
-    // Extrair texto da mensagem considerando diferentes tipos
     const messageText = (
       messageContent.conversation ||
       messageContent.extendedTextMessage?.text ||
@@ -118,10 +105,8 @@ async function handleMessage({ messages, type }) {
       ''
     ).trim();
 
-    // Verificar se é mensagem de localização
     const hasLocation = Boolean(messageContent.locationMessage);
     
-    // Ignorar mensagens vazias e do próprio bot
     if (!messageText && !hasLocation) continue;
     if (msg.key.fromMe) continue;
     
@@ -146,6 +131,10 @@ async function handleMessage({ messages, type }) {
           await handleDestination(from, messageText, hasLocation, msg);
           break;
           
+        case CONVERSATION_STATES.WAITING_VEHICLE_TYPE:
+          await handleVehicleType(from, messageText);
+          break;
+          
         case CONVERSATION_STATES.WAITING_CONFIRMATION:
           await handleConfirmation(from, messageText);
           break;
@@ -156,13 +145,20 @@ async function handleMessage({ messages, type }) {
       }
     } catch (error) {
       console.error(`Erro ao processar mensagem: ${error.message}`);
-      await sendMessage(from, MESSAGES.ERROR_GEOCODING);
+      
+      if (error.message.includes('geocod')) {
+        await sendMessage(from, MESSAGES.ERROR_GEOCODING);
+      } else if (error.message.includes('rota') || error.message.includes('routing')) {
+        await sendMessage(from, MESSAGES.ERROR_ROUTING);
+      } else {
+        await sendMessage(from, MESSAGES.ERROR_GENERAL);
+      }
+      
       storage.clearConversation(from);
     }
   }
 }
 
-// Melhorar a detecção de palavras-chave
 function containsKeyword(text, keywords) {
   if (!text) return false;
   return keywords.some(keyword => 
@@ -239,50 +235,87 @@ async function handleDestination(from, messageText, hasLocation, msg) {
     }
     
     const conversationState = storage.getConversationState(from);
+    
+    storage.setConversationState(from, CONVERSATION_STATES.WAITING_VEHICLE_TYPE, {
+      ...conversationState.data,
+      destination: { coords: destinationCoords, address: destinationAddress },
+    });
+    
+    await sendMessage(from, MESSAGES.ASK_VEHICLE_TYPE);
+  } catch (error) {
+    console.error('Erro ao processar destino:', error);
+    await sendMessage(from, MESSAGES.ERROR_GEOCODING);
+  }
+}
+
+async function handleVehicleType(from, messageText) {
+  try {
+    const text = messageText.toLowerCase().trim();
+    const conversationState = storage.getConversationState(from);
     const originCoords = conversationState.data.origin.coords;
+    const destinationCoords = conversationState.data.destination.coords;
+    
+    let vehicleType = null;
+    let routingOptions = {};
+    
+    if (text.includes('normal') || text.includes('1')) {
+      vehicleType = VEHICLE_TYPES.NORMAL;
+      routingOptions.profile = 'driving-car';
+    } else if (text.includes('grande') || text.includes('2') || text.includes('pesado')) {
+      vehicleType = VEHICLE_TYPES.HEAVY;
+      routingOptions.profile = 'driving-hgv';
+    } else if (text.includes('emergência') || text.includes('emergencia') || text.includes('3')) {
+      vehicleType = VEHICLE_TYPES.EMERGENCY;
+      routingOptions.profile = 'driving-car';
+    } else {
+      vehicleType = VEHICLE_TYPES.NORMAL;
+      routingOptions.profile = 'driving-car';
+    }
+    
+    await sendMessage(from, MESSAGES.CALCULATING_ROUTE);
     
     const routeInfo = await routingService.calculateMultipleRoutes(
       driverLocation,
       originCoords,
-      destinationCoords
+      destinationCoords,
+      routingOptions
     );
     
-    const priceInfo = pricingService.getPriceBreakdown(routeInfo.clientToDestination.distance);
+    const priceInfo = pricingService.getPriceBreakdown(
+      routeInfo.clientToDestination.distance,
+      vehicleType
+    );
     
     storage.setConversationState(from, CONVERSATION_STATES.WAITING_CONFIRMATION, {
       ...conversationState.data,
-      destination: { coords: destinationCoords, address: destinationAddress },
       route: routeInfo,
       price: priceInfo,
+      vehicleType: vehicleType,
     });
+    
+    const vehicleEmoji = vehicleType === VEHICLE_TYPES.HEAVY ? '🚛' : 
+                         vehicleType === VEHICLE_TYPES.EMERGENCY ? '🚑' : '🚗';
     
     const summary = `📊 *Resumo da Corrida*
 
 📍 *Origem:* ${conversationState.data.origin.address}
-📍 *Destino:* ${destinationAddress}
+📍 *Destino:* ${conversationState.data.destination.address}
 
+${vehicleEmoji} *Tipo de veículo:* ${vehicleType}
 📏 *Distância:* ${routeInfo.clientToDestination.distance} km
 ⏱️ *Tempo estimado:* ${routeInfo.clientToDestination.duration} minutos
 💰 *Valor:* ${priceInfo.formatted}
 
-Escolha uma opção:`.trim();
+Digite uma das opções:
+1️⃣ "confirmar" - Confirmar corrida agora
+2️⃣ "agendar" - Agendar para depois
+3️⃣ "cancelar" - Cancelar solicitação`;
     
-    const buttons = [
-      { buttonId: 'confirmar', buttonText: { displayText: 'Confirmar Agora' }, type: 1 },
-      { buttonId: 'agendar', buttonText: { displayText: 'Agendar Corrida' }, type: 1 },
-      { buttonId: 'cancelar', buttonText: { displayText: 'Cancelar' }, type: 1 }
-    ];
-
-    const buttonMessage = {
-      text: summary,
-      footer: buttons,
-      headerType: 1
-    };
-
-    await sock.sendMessage(from, buttonMessage);
+    await sendMessage(from, summary);
   } catch (error) {
-    console.error('Erro ao processar destino:', error);
+    console.error('Erro ao processar tipo de veículo:', error);
     await sendMessage(from, MESSAGES.ERROR_ROUTING);
+    storage.clearConversation(from);
   }
 }
 
@@ -290,13 +323,14 @@ async function handleConfirmation(from, messageText) {
   const text = messageText.toLowerCase().trim();
   const conversationState = storage.getConversationState(from);
   
-  if (text === 'confirmar' || text === 'confirmar agora') {
+  if (text === 'confirmar' || text === '1' || text === 'confirmar agora') {
     const ride = storage.addRide({
       clientPhone: from,
       origin: conversationState.data.origin,
       destination: conversationState.data.destination,
       route: conversationState.data.route,
       price: conversationState.data.price,
+      vehicleType: conversationState.data.vehicleType,
       status: RIDE_STATUS.CONFIRMED,
     });
     
@@ -304,11 +338,11 @@ async function handleConfirmation(from, messageText) {
     await notifyDriver(ride);
     
     storage.clearConversation(from);
-  } else if (text === 'agendar' || text === 'agendar corrida') {
+  } else if (text === 'agendar' || text === '2' || text === 'agendar corrida') {
     storage.setConversationState(from, CONVERSATION_STATES.WAITING_SCHEDULE);
-    await sendMessage(from, '📅 Para quando deseja agendar? (exemplo: "amanhã 14:00" ou "hoje 18:30")');
-  } else if (text === 'cancelar') {
-    await sendMessage(from, 'Corrida cancelada. Digite "uber" quando quiser solicitar uma nova corrida.');
+    await sendMessage(from, MESSAGES.ASK_SCHEDULE_TIME);
+  } else if (text === 'cancelar' || text === '3') {
+    await sendMessage(from, MESSAGES.RIDE_CANCELLED);
     storage.clearConversation(from);
   } else {
     await sendMessage(from, MESSAGES.INVALID_OPTION);
@@ -320,12 +354,18 @@ async function handleSchedule(from, messageText) {
   
   const scheduledTime = parseScheduleTime(messageText);
   
+  if (!scheduledTime || scheduledTime <= new Date()) {
+    await sendMessage(from, '⚠️ Horário inválido ou no passado. Tente novamente (exemplo: "hoje 18:00" ou "amanhã 14:30")');
+    return;
+  }
+  
   const ride = storage.addRide({
     clientPhone: from,
     origin: conversationState.data.origin,
     destination: conversationState.data.destination,
     route: conversationState.data.route,
     price: conversationState.data.price,
+    vehicleType: conversationState.data.vehicleType,
     status: RIDE_STATUS.SCHEDULED,
     scheduledFor: messageText,
     scheduledTime: scheduledTime,
@@ -339,7 +379,15 @@ async function handleSchedule(from, messageText) {
     price: conversationState.data.price,
   }, scheduledTime);
   
-  await sendMessage(from, `${MESSAGES.RIDE_SCHEDULED}\n\n📅 Data/Hora: ${messageText}`);
+  const formattedTime = scheduledTime.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+  
+  await sendMessage(from, `${MESSAGES.RIDE_SCHEDULED}\n\n📅 Data/Hora: ${formattedTime}`);
   
   storage.clearConversation(from);
 }
@@ -354,7 +402,14 @@ function parseScheduleTime(text) {
     
     const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
     if (timeMatch) {
-      tomorrow.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2]), 0, 0);
+      const hour = parseInt(timeMatch[1]);
+      const minute = parseInt(timeMatch[2]);
+      
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return null;
+      }
+      
+      tomorrow.setHours(hour, minute, 0, 0);
       return tomorrow;
     }
     tomorrow.setHours(9, 0, 0, 0);
@@ -365,7 +420,19 @@ function parseScheduleTime(text) {
     const today = new Date(now);
     const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
     if (timeMatch) {
-      today.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2]), 0, 0);
+      const hour = parseInt(timeMatch[1]);
+      const minute = parseInt(timeMatch[2]);
+      
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        return null;
+      }
+      
+      today.setHours(hour, minute, 0, 0);
+      
+      if (today <= now) {
+        return null;
+      }
+      
       return today;
     }
   }
@@ -375,6 +442,11 @@ function parseScheduleTime(text) {
     const scheduled = new Date(now);
     const hour = parseInt(timeMatch[1]);
     const minute = parseInt(timeMatch[2]);
+    
+    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+      return null;
+    }
+    
     scheduled.setHours(hour, minute, 0, 0);
     
     if (scheduled <= now) {
@@ -383,9 +455,7 @@ function parseScheduleTime(text) {
     return scheduled;
   }
   
-  const futureTime = new Date(now);
-  futureTime.setHours(now.getHours() + 2);
-  return futureTime;
+  return null;
 }
 
 async function notifyDriver(ride) {
@@ -396,6 +466,9 @@ async function notifyDriver(ride) {
     return;
   }
   
+  const vehicleEmoji = ride.vehicleType === VEHICLE_TYPES.HEAVY ? '🚛' : 
+                       ride.vehicleType === VEHICLE_TYPES.EMERGENCY ? '🚑' : '🚗';
+  
   const notification = `
 🚗 *Nova Corrida Confirmada!*
 
@@ -404,6 +477,7 @@ async function notifyDriver(ride) {
 📍 *Origem:* ${ride.origin.address}
 📍 *Destino:* ${ride.destination.address}
 
+${vehicleEmoji} *Tipo de veículo:* ${ride.vehicleType}
 📏 *Distância até cliente:* ${ride.route.driverToClient.distance} km (${ride.route.driverToClient.duration} min)
 📏 *Distância da corrida:* ${ride.route.clientToDestination.distance} km
 💰 *Valor:* ${ride.price.formatted}

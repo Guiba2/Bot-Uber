@@ -25,12 +25,14 @@ class RoutingService {
     try {
       const client = this.getDirectionsClient();
       
+      const profile = options.profile || 'driving-car';
+      
       const requestParams = {
         coordinates: [
           [originCoords.longitude, originCoords.latitude],
           [destinationCoords.longitude, destinationCoords.latitude],
         ],
-        profile: 'driving-car',
+        profile: profile,
         format: 'json',
       };
 
@@ -40,13 +42,6 @@ class RoutingService {
             type: 'Polygon',
             coordinates: options.avoidPolygons,
           },
-        };
-      }
-
-      if (options.vehicleType) {
-        requestParams.options = {
-          ...requestParams.options,
-          vehicle_type: options.vehicleType,
         };
       }
 
@@ -68,6 +63,8 @@ class RoutingService {
           console.error('API key inválida ou ausente');
         } else if (error.status === 403) {
           console.error('Limite de requisições da API OpenRouteService atingido');
+        } else if (error.status === 400) {
+          console.error('Parâmetros inválidos na requisição de rota');
         } else if (error.status === 500) {
           if (error.response) {
             error.response.json().then(details => {
