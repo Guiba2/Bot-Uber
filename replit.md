@@ -7,14 +7,20 @@ A WhatsApp bot application for scheduling and managing car rides, built with Nod
 ### Recent Changes (October 2025)
 - **Migrated to official SDKs**: Now using `opencage-api-client` and `openrouteservice-js` instead of direct HTTP calls
 - **Enhanced Disaster Routing Support**: Modified routing.js to support OpenRouteService disaster features:
+  - Support for multiple routing profiles (`driving-car`, `driving-hgv`)
   - Support for `avoidPolygons` parameter to avoid blocked/flooded areas during emergencies
-  - Support for `vehicleType` parameter for heavy vehicles (aid delivery trucks)
   - Returns route geometry for visualization
   - Configurable host for flexibility between standard and disaster endpoints
+- **Vehicle Type System**: Added support for three vehicle types with dynamic pricing:
+  - Carro Normal (driving-car profile) - Standard pricing
+  - Veículo Pesado (driving-hgv profile) - 1.5x price multiplier
+  - Emergência (driving-car profile) - 1.8x price multiplier
+- **Code Cleanup**: Removed deprecated button system and legacy CommonJS code
+- **Improved Error Handling**: Differentiated error messages for geocoding, routing, and general errors
+- **Enhanced Schedule Validation**: Added proper time validation to prevent scheduling in the past
 - Implemented robust error handling for driver location with fallback to São Paulo coordinates
 - Added complete scheduling system with natural language parsing in Portuguese ("hoje 14:00", "amanhã 18:30")
 - Configured automated reminders (1 hour before ride) and driver notifications via node-cron
-- Enhanced error handling with specific messages for rate limiting, invalid keys, and route not found errors
 - PostgreSQL database created for persistent storage (ready for migration from in-memory storage)
 
 ## User Preferences
@@ -27,7 +33,7 @@ Preferred communication style: Simple, everyday language.
 - **WhatsApp Integration**: Uses `@whiskeysockets/baileys` library for WhatsApp Web connection
 - **QR Code Authentication**: Terminal-based QR code display for initial setup using `qrcode-terminal`
 - **Multi-file Auth State**: Persistent authentication sessions to avoid repeated QR scans
-- **Conversation State Machine**: Tracks user conversation flow through predefined states (IDLE, WAITING_ORIGIN, WAITING_DESTINATION, WAITING_CONFIRMATION, WAITING_SCHEDULE)
+- **Conversation State Machine**: Tracks user conversation flow through predefined states (IDLE, WAITING_ORIGIN, WAITING_DESTINATION, WAITING_VEHICLE_TYPE, WAITING_CONFIRMATION, WAITING_SCHEDULE)
 
 **Design Rationale**: Baileys provides a lightweight, protocol-compliant WhatsApp client without requiring official API access. The state machine pattern ensures conversations follow a logical flow and prevents mixed-up user inputs.
 
@@ -40,10 +46,18 @@ Preferred communication style: Simple, everyday language.
 
 ### Routing & Pricing
 - **Route Calculation**: OpenRouteService API via official SDK (`openrouteservice-js`) computes driving routes and distances
-- **Dynamic Pricing**: Distance-based fare calculation with configurable base fare, per-kilometer rate, and minimum fare
+- **Multiple Routing Profiles**: Supports different vehicle types with appropriate routing profiles:
+  - `driving-car`: Standard passenger vehicles
+  - `driving-hgv`: Heavy goods vehicles with appropriate routing restrictions
+- **Dynamic Pricing**: Distance-based fare calculation with vehicle-type multipliers:
+  - Base fare + per-kilometer rate
+  - Carro Normal: 1.0x multiplier
+  - Veículo Pesado: 1.5x multiplier
+  - Emergência: 1.8x multiplier
 - **Multi-leg Routes**: Supports driver-to-client and client-to-destination route calculations
+- **Disaster Support**: Can avoid blocked/flooded areas using `avoidPolygons` parameter
 
-**Design Rationale**: Separating routing from geocoding allows for provider flexibility. The official SDK provides structured error responses (HTTP status codes and internal error codes), lazy initialization for better performance, and better TypeScript support. The pricing model is simple but extensible, with all constants defined in configuration for easy adjustment.
+**Design Rationale**: Separating routing from geocoding allows for provider flexibility. The official SDK provides structured error responses (HTTP status codes and internal error codes), lazy initialization for better performance, and better TypeScript support. The pricing model is simple but extensible, with all constants defined in configuration for easy adjustment. Multiple vehicle types allow for specialized routing and pricing for different use cases (emergency response, heavy cargo, etc.).
 
 ### Data Storage
 - **In-Memory Storage**: Custom `MemoryStorage` class using JavaScript Maps
