@@ -1,9 +1,9 @@
 import Openrouteservice from 'openrouteservice-js';
-//const Openrouteservice = require('openrouteservice-js');
 
 class RoutingService {
   constructor() {
     this.directions = null;
+    this.baseHost = 'api.openrouteservice.org';
   }
 
   getDirectionsClient() {
@@ -14,24 +14,43 @@ class RoutingService {
 
       this.directions = new Openrouteservice.Directions({
         api_key: process.env.OPENROUTESERVICE_API_KEY,
+        host: this.baseHost,
       });
     }
 
     return this.directions;
   }
 
-  async calculateRoute(originCoords, destinationCoords) {
+  async calculateRoute(originCoords, destinationCoords, options = {}) {
     try {
       const client = this.getDirectionsClient();
       
-      const result = await client.calculate({
+      const requestParams = {
         coordinates: [
           [originCoords.longitude, originCoords.latitude],
           [destinationCoords.longitude, destinationCoords.latitude],
         ],
         profile: 'driving-car',
         format: 'json',
-      });
+      };
+
+      if (options.avoidPolygons && options.avoidPolygons.length > 0) {
+        requestParams.options = {
+          avoid_polygons: {
+            type: 'Polygon',
+            coordinates: options.avoidPolygons,
+          },
+        };
+      }
+
+      if (options.vehicleType) {
+        requestParams.options = {
+          ...requestParams.options,
+          vehicle_type: options.vehicleType,
+        };
+      }
+
+      const result = await client.calculate(requestParams);
 
       const route = result.routes[0];
       const summary = route.summary;
@@ -39,6 +58,7 @@ class RoutingService {
       return {
         distance: (summary.distance / 1000).toFixed(2),
         duration: Math.round(summary.duration / 60),
+        geometry: route.geometry,
       };
     } catch (error) {
       console.error('Erro ao calcular rota:', error.message);
@@ -63,10 +83,10 @@ class RoutingService {
     }
   }
 
-  async calculateMultipleRoutes(driverCoords, clientCoords, destinationCoords) {
+  async calculateMultipleRoutes(driverCoords, clientCoords, destinationCoords, options = {}) {
     try {
-      const driverToClient = await this.calculateRoute(driverCoords, clientCoords);
-      const clientToDestination = await this.calculateRoute(clientCoords, destinationCoords);
+      const driverToClient = await this.calculateRoute(driverCoords, clientCoords, options);
+      const clientToDestination = await this.calculateRoute(clientCoords, destinationCoords, options);
 
       return {
         driverToClient,
@@ -83,4 +103,3 @@ class RoutingService {
   }
 }
 export default new RoutingService();
-//module.exports = new RoutingService();

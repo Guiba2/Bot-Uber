@@ -6,11 +6,16 @@ A WhatsApp bot application for scheduling and managing car rides, built with Nod
 
 ### Recent Changes (October 2025)
 - **Migrated to official SDKs**: Now using `opencage-api-client` and `openrouteservice-js` instead of direct HTTP calls
+- **Enhanced Disaster Routing Support**: Modified routing.js to support OpenRouteService disaster features:
+  - Support for `avoidPolygons` parameter to avoid blocked/flooded areas during emergencies
+  - Support for `vehicleType` parameter for heavy vehicles (aid delivery trucks)
+  - Returns route geometry for visualization
+  - Configurable host for flexibility between standard and disaster endpoints
 - Implemented robust error handling for driver location with fallback to São Paulo coordinates
 - Added complete scheduling system with natural language parsing in Portuguese ("hoje 14:00", "amanhã 18:30")
 - Configured automated reminders (1 hour before ride) and driver notifications via node-cron
 - Enhanced error handling with specific messages for rate limiting, invalid keys, and route not found errors
-- All functionality tested and validated by architect review
+- PostgreSQL database created for persistent storage (ready for migration from in-memory storage)
 
 ## User Preferences
 
