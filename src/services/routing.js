@@ -14,7 +14,7 @@ class RoutingService {
 
       this.directions = new Openrouteservice.Directions({
         api_key: process.env.OPENROUTESERVICE_API_KEY,
-        host: this.baseHost,
+        host: 'https://api.openrouteservice.org', // ✅ Correção aqui
       });
     }
 

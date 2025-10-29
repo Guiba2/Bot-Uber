@@ -5,11 +5,11 @@ import qrcode from 'qrcode-terminal';
 import cron from 'node-cron';
 import axios from 'axios';
 
-import storage from './utils/storage.js';
-import geocodingService from './services/geocoding.js';
-import routingService from './services/routing.js';
-import pricingService from './services/pricing.js';
-import { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES, VEHICLE_TYPES } from './config/constants.js';
+import storage from '../../Bot-UberTest/src/utils/storage.js';
+import geocodingService from '../../Bot-UberTest/src/services/geocoding.js';
+import routingService from '../../Bot-UberTest/src/services/routing.js';
+import pricingService from '../../Bot-UberTest/src/services/pricing.js';
+import { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES } from '../../Bot-UberTest/src/config/constants.js';
 
 import dotenv from 'dotenv';
 dotenv.config();
@@ -40,7 +40,7 @@ async function initializeDriverLocation() {
   } else {
     try {
       const location = await geocodingService.getLocationFromIP(driverIp);
-      if (location && location.latitude && location.longitude) {
+      if (location && location.latitude && longitude.longitude) {
         driverLocation = location;
         console.log('📍 Localização do motorista obtida via IP:', driverLocation);
       } else {
@@ -114,6 +114,18 @@ async function handleMessage({ messages, type }) {
     
     const conversationState = storage.getConversationState(from);
     
+    // Verificar se o usuário quer cancelar (funciona em qualquer momento)
+    if (containsKeyword(messageText.toLowerCase(), KEYWORDS.CANCEL)) {
+      if (conversationState.state !== CONVERSATION_STATES.IDLE) {
+        await sendMessage(from, MESSAGES.CANCELLED);
+        storage.clearConversation(from);
+        console.log(`🔴 Conversa cancelada por ${from}`);
+      } else {
+        await sendMessage(from, 'Não há nenhuma solicitação em andamento.\n\nDigite "chamar carro" para iniciar uma nova corrida.');
+      }
+      continue;
+    }
+    
     try {
       switch (conversationState.state) {
         case CONVERSATION_STATES.IDLE:
@@ -126,13 +138,17 @@ async function handleMessage({ messages, type }) {
         case CONVERSATION_STATES.WAITING_ORIGIN:
           await handleOrigin(from, messageText, hasLocation, msg);
           break;
+
+        case CONVERSATION_STATES.CONFIRMING_ORIGIN:
+          await handleOriginConfirmation(from, messageText);
+          break;
           
         case CONVERSATION_STATES.WAITING_DESTINATION:
           await handleDestination(from, messageText, hasLocation, msg);
           break;
-          
-        case CONVERSATION_STATES.WAITING_VEHICLE_TYPE:
-          await handleVehicleType(from, messageText);
+
+        case CONVERSATION_STATES.CONFIRMING_DESTINATION:
+          await handleDestinationConfirmation(from, messageText);
           break;
           
         case CONVERSATION_STATES.WAITING_CONFIRMATION:
@@ -145,15 +161,7 @@ async function handleMessage({ messages, type }) {
       }
     } catch (error) {
       console.error(`Erro ao processar mensagem: ${error.message}`);
-      
-      if (error.message.includes('geocod')) {
-        await sendMessage(from, MESSAGES.ERROR_GEOCODING);
-      } else if (error.message.includes('rota') || error.message.includes('routing')) {
-        await sendMessage(from, MESSAGES.ERROR_ROUTING);
-      } else {
-        await sendMessage(from, MESSAGES.ERROR_GENERAL);
-      }
-      
+      await sendMessage(from, MESSAGES.ERROR_GEOCODING);
       storage.clearConversation(from);
     }
   }
@@ -171,6 +179,7 @@ async function handleOrigin(from, messageText, hasLocation, msg) {
   try {
     let originCoords;
     let originAddress;
+    let locationOptions;
     
     if (hasLocation) {
       const location = msg.message.locationMessage;
@@ -179,37 +188,81 @@ async function handleOrigin(from, messageText, hasLocation, msg) {
         longitude: location.degreesLongitude,
       };
       originAddress = 'Localização compartilhada';
+      
+      // Buscar endereços próximos à localização compartilhada
+      await sendMessage(from, MESSAGES.PROCESSING);
+      locationOptions = await geocodingService.reverseGeocode(originCoords);
     } else {
       await sendMessage(from, MESSAGES.PROCESSING);
-      const geocoded = await geocodingService.geocodeAddress(messageText);
+      locationOptions = await geocodingService.geocodeAddressMultiple(messageText);
       
-      if (!geocoded) {
+      if (!locationOptions || locationOptions.length === 0) {
         await sendMessage(from, MESSAGES.ERROR_GEOCODING);
         return;
       }
-      
-      originCoords = {
-        latitude: geocoded.latitude,
-        longitude: geocoded.longitude,
-      };
-      originAddress = geocoded.formattedAddress;
     }
     
-    storage.setConversationState(from, CONVERSATION_STATES.WAITING_DESTINATION, {
-      origin: { coords: originCoords, address: originAddress },
+    // Armazenar as opções temporariamente
+    storage.setConversationState(from, CONVERSATION_STATES.CONFIRMING_ORIGIN, {
+      locationOptions,
+      searchQuery: messageText,
     });
     
-    await sendMessage(from, MESSAGES.ASK_DESTINATION);
+    // Mostrar opções para o usuário
+    let optionsMessage = '📍 *Encontrei estes locais:*\n\n';
+    locationOptions.forEach((loc, index) => {
+      optionsMessage += `*${index + 1}.* ${loc.formattedAddress}\n\n`;
+    });
+    optionsMessage += `*${locationOptions.length + 1}.* Nenhuma dessas opções\n\n`;
+    optionsMessage += 'Digite o número da opção desejada:';
+    
+    await sendMessage(from, optionsMessage);
+    
   } catch (error) {
     console.error('Erro ao processar origem:', error);
     await sendMessage(from, MESSAGES.ERROR_GEOCODING);
   }
 }
 
+async function handleOriginConfirmation(from, messageText) {
+  const conversationState = storage.getConversationState(from);
+  const { locationOptions, searchQuery } = conversationState.data;
+  
+  const choice = parseInt(messageText.trim());
+  
+  if (isNaN(choice) || choice < 1 || choice > locationOptions.length + 1) {
+    await sendMessage(from, 'Por favor, digite um número válido da lista.');
+    return;
+  }
+  
+  // Se escolheu "Nenhuma dessas opções"
+  if (choice === locationOptions.length + 1) {
+    await sendMessage(from, '🔍 Por favor, descreva melhor o local de origem (ex: "próximo ao shopping X" ou "rua Y, número Z"):');
+    storage.setConversationState(from, CONVERSATION_STATES.WAITING_ORIGIN);
+    return;
+  }
+  
+  // Selecionou uma das opções
+  const selectedLocation = locationOptions[choice - 1];
+  
+  storage.setConversationState(from, CONVERSATION_STATES.WAITING_DESTINATION, {
+    origin: { 
+      coords: {
+        latitude: selectedLocation.latitude,
+        longitude: selectedLocation.longitude,
+      },
+      address: selectedLocation.formattedAddress,
+    },
+  });
+  
+  await sendMessage(from, `✅ Origem confirmada: ${selectedLocation.formattedAddress}\n\n${MESSAGES.ASK_DESTINATION}`);
+}
+
 async function handleDestination(from, messageText, hasLocation, msg) {
   try {
     let destinationCoords;
     let destinationAddress;
+    let locationOptions;
     
     if (hasLocation) {
       const location = msg.message.locationMessage;
@@ -217,103 +270,112 @@ async function handleDestination(from, messageText, hasLocation, msg) {
         latitude: location.degreesLatitude,
         longitude: location.degreesLongitude,
       };
-      destinationAddress = 'Localização compartilhada';
+      
+      await sendMessage(from, MESSAGES.PROCESSING);
+      locationOptions = await geocodingService.reverseGeocode(destinationCoords);
     } else {
       await sendMessage(from, MESSAGES.PROCESSING);
-      const geocoded = await geocodingService.geocodeAddress(messageText);
+      locationOptions = await geocodingService.geocodeAddressMultiple(messageText);
       
-      if (!geocoded) {
+      if (!locationOptions || locationOptions.length === 0) {
         await sendMessage(from, MESSAGES.ERROR_GEOCODING);
         return;
       }
-      
-      destinationCoords = {
-        latitude: geocoded.latitude,
-        longitude: geocoded.longitude,
-      };
-      destinationAddress = geocoded.formattedAddress;
     }
     
     const conversationState = storage.getConversationState(from);
     
-    storage.setConversationState(from, CONVERSATION_STATES.WAITING_VEHICLE_TYPE, {
+    // Armazenar as opções temporariamente
+    storage.setConversationState(from, CONVERSATION_STATES.CONFIRMING_DESTINATION, {
       ...conversationState.data,
-      destination: { coords: destinationCoords, address: destinationAddress },
+      locationOptions,
+      searchQuery: messageText,
     });
     
-    await sendMessage(from, MESSAGES.ASK_VEHICLE_TYPE);
+    // Mostrar opções para o usuário
+    let optionsMessage = '📍 *Encontrei estes destinos:*\n\n';
+    locationOptions.forEach((loc, index) => {
+      optionsMessage += `*${index + 1}.* ${loc.formattedAddress}\n\n`;
+    });
+    optionsMessage += `*${locationOptions.length + 1}.* Nenhuma dessas opções\n\n`;
+    optionsMessage += 'Digite o número da opção desejada:';
+    
+    await sendMessage(from, optionsMessage);
+    
   } catch (error) {
     console.error('Erro ao processar destino:', error);
-    await sendMessage(from, MESSAGES.ERROR_GEOCODING);
+    await sendMessage(from, MESSAGES.ERROR_ROUTING);
   }
 }
 
-async function handleVehicleType(from, messageText) {
+async function handleDestinationConfirmation(from, messageText) {
+  const conversationState = storage.getConversationState(from);
+  const { locationOptions, origin } = conversationState.data;
+  
+  const choice = parseInt(messageText.trim());
+  
+  if (isNaN(choice) || choice < 1 || choice > locationOptions.length + 1) {
+    await sendMessage(from, 'Por favor, digite um número válido da lista.');
+    return;
+  }
+  
+  // Se escolheu "Nenhuma dessas opções"
+  if (choice === locationOptions.length + 1) {
+    await sendMessage(from, '🔍 Por favor, descreva melhor o destino (ex: "próximo ao shopping X" ou "rua Y, número Z"):');
+    storage.setConversationState(from, CONVERSATION_STATES.WAITING_DESTINATION, {
+      origin,
+    });
+    return;
+  }
+  
+  // Selecionou uma das opções
+  const selectedLocation = locationOptions[choice - 1];
+  
+  const destinationCoords = {
+    latitude: selectedLocation.latitude,
+    longitude: selectedLocation.longitude,
+  };
+  
+  const originCoords = origin.coords;
+  
+  await sendMessage(from, '⏳ Calculando rota...');
+  
   try {
-    const text = messageText.toLowerCase().trim();
-    const conversationState = storage.getConversationState(from);
-    const originCoords = conversationState.data.origin.coords;
-    const destinationCoords = conversationState.data.destination.coords;
-    
-    let vehicleType = null;
-    let routingOptions = {};
-    
-    if (text.includes('normal') || text.includes('1')) {
-      vehicleType = VEHICLE_TYPES.NORMAL;
-      routingOptions.profile = 'driving-car';
-    } else if (text.includes('grande') || text.includes('2') || text.includes('pesado')) {
-      vehicleType = VEHICLE_TYPES.HEAVY;
-      routingOptions.profile = 'driving-hgv';
-    } else if (text.includes('emergência') || text.includes('emergencia') || text.includes('3')) {
-      vehicleType = VEHICLE_TYPES.EMERGENCY;
-      routingOptions.profile = 'driving-car';
-    } else {
-      vehicleType = VEHICLE_TYPES.NORMAL;
-      routingOptions.profile = 'driving-car';
-    }
-    
-    await sendMessage(from, MESSAGES.CALCULATING_ROUTE);
-    
     const routeInfo = await routingService.calculateMultipleRoutes(
       driverLocation,
       originCoords,
-      destinationCoords,
-      routingOptions
+      destinationCoords
     );
     
-    const priceInfo = pricingService.getPriceBreakdown(
-      routeInfo.clientToDestination.distance,
-      vehicleType
-    );
+    const priceInfo = pricingService.getPriceBreakdown(routeInfo.clientToDestination.distance);
     
     storage.setConversationState(from, CONVERSATION_STATES.WAITING_CONFIRMATION, {
-      ...conversationState.data,
+      origin,
+      destination: { 
+        coords: destinationCoords, 
+        address: selectedLocation.formattedAddress 
+      },
       route: routeInfo,
       price: priceInfo,
-      vehicleType: vehicleType,
     });
     
-    const vehicleEmoji = vehicleType === VEHICLE_TYPES.HEAVY ? '🚛' : 
-                         vehicleType === VEHICLE_TYPES.EMERGENCY ? '🚑' : '🚗';
-    
-    const summary = `📊 *Resumo da Corrida*
+    const summary = `✅ *Destino confirmado!*\n\n📊 *Resumo da Corrida*
 
-📍 *Origem:* ${conversationState.data.origin.address}
-📍 *Destino:* ${conversationState.data.destination.address}
+📍 *Origem:* ${origin.address}
+📍 *Destino:* ${selectedLocation.formattedAddress}
 
-${vehicleEmoji} *Tipo de veículo:* ${vehicleType}
 📏 *Distância:* ${routeInfo.clientToDestination.distance} km
 ⏱️ *Tempo estimado:* ${routeInfo.clientToDestination.duration} minutos
 💰 *Valor:* ${priceInfo.formatted}
 
-Digite uma das opções:
-1️⃣ "confirmar" - Confirmar corrida agora
-2️⃣ "agendar" - Agendar para depois
-3️⃣ "cancelar" - Cancelar solicitação`;
+*Escolha uma opção:*
+• Digite *"confirmar"* para solicitar agora
+• Digite *"agendar"* para agendar
+• Digite *"cancelar"* para desistir`.trim();
     
     await sendMessage(from, summary);
   } catch (error) {
-    console.error('Erro ao processar tipo de veículo:', error);
+    console.error('Erro ao calcular rota:', error);
     await sendMessage(from, MESSAGES.ERROR_ROUTING);
     storage.clearConversation(from);
   }
@@ -323,14 +385,13 @@ async function handleConfirmation(from, messageText) {
   const text = messageText.toLowerCase().trim();
   const conversationState = storage.getConversationState(from);
   
-  if (text === 'confirmar' || text === '1' || text === 'confirmar agora') {
+  if (text === 'confirmar' || text === 'confirmar agora') {
     const ride = storage.addRide({
       clientPhone: from,
       origin: conversationState.data.origin,
       destination: conversationState.data.destination,
       route: conversationState.data.route,
       price: conversationState.data.price,
-      vehicleType: conversationState.data.vehicleType,
       status: RIDE_STATUS.CONFIRMED,
     });
     
@@ -338,11 +399,11 @@ async function handleConfirmation(from, messageText) {
     await notifyDriver(ride);
     
     storage.clearConversation(from);
-  } else if (text === 'agendar' || text === '2' || text === 'agendar corrida') {
+  } else if (text === 'agendar' || text === 'agendar corrida') {
     storage.setConversationState(from, CONVERSATION_STATES.WAITING_SCHEDULE);
-    await sendMessage(from, MESSAGES.ASK_SCHEDULE_TIME);
-  } else if (text === 'cancelar' || text === '3') {
-    await sendMessage(from, MESSAGES.RIDE_CANCELLED);
+    await sendMessage(from, '📅 Para quando deseja agendar? (exemplo: "amanhã 14:00" ou "hoje 18:30")');
+  } else if (text === 'cancelar') {
+    await sendMessage(from, 'Corrida cancelada. Digite "uber" quando quiser solicitar uma nova corrida.');
     storage.clearConversation(from);
   } else {
     await sendMessage(from, MESSAGES.INVALID_OPTION);
@@ -354,18 +415,12 @@ async function handleSchedule(from, messageText) {
   
   const scheduledTime = parseScheduleTime(messageText);
   
-  if (!scheduledTime || scheduledTime <= new Date()) {
-    await sendMessage(from, '⚠️ Horário inválido ou no passado. Tente novamente (exemplo: "hoje 18:00" ou "amanhã 14:30")');
-    return;
-  }
-  
   const ride = storage.addRide({
     clientPhone: from,
     origin: conversationState.data.origin,
     destination: conversationState.data.destination,
     route: conversationState.data.route,
     price: conversationState.data.price,
-    vehicleType: conversationState.data.vehicleType,
     status: RIDE_STATUS.SCHEDULED,
     scheduledFor: messageText,
     scheduledTime: scheduledTime,
@@ -379,15 +434,7 @@ async function handleSchedule(from, messageText) {
     price: conversationState.data.price,
   }, scheduledTime);
   
-  const formattedTime = scheduledTime.toLocaleString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-  
-  await sendMessage(from, `${MESSAGES.RIDE_SCHEDULED}\n\n📅 Data/Hora: ${formattedTime}`);
+  await sendMessage(from, `${MESSAGES.RIDE_SCHEDULED}\n\n📅 Data/Hora: ${messageText}`);
   
   storage.clearConversation(from);
 }
@@ -402,14 +449,7 @@ function parseScheduleTime(text) {
     
     const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
     if (timeMatch) {
-      const hour = parseInt(timeMatch[1]);
-      const minute = parseInt(timeMatch[2]);
-      
-      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-        return null;
-      }
-      
-      tomorrow.setHours(hour, minute, 0, 0);
+      tomorrow.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2]), 0, 0);
       return tomorrow;
     }
     tomorrow.setHours(9, 0, 0, 0);
@@ -420,19 +460,7 @@ function parseScheduleTime(text) {
     const today = new Date(now);
     const timeMatch = text.match(/(\d{1,2}):(\d{2})/);
     if (timeMatch) {
-      const hour = parseInt(timeMatch[1]);
-      const minute = parseInt(timeMatch[2]);
-      
-      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-        return null;
-      }
-      
-      today.setHours(hour, minute, 0, 0);
-      
-      if (today <= now) {
-        return null;
-      }
-      
+      today.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2]), 0, 0);
       return today;
     }
   }
@@ -442,11 +470,6 @@ function parseScheduleTime(text) {
     const scheduled = new Date(now);
     const hour = parseInt(timeMatch[1]);
     const minute = parseInt(timeMatch[2]);
-    
-    if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-      return null;
-    }
-    
     scheduled.setHours(hour, minute, 0, 0);
     
     if (scheduled <= now) {
@@ -455,7 +478,9 @@ function parseScheduleTime(text) {
     return scheduled;
   }
   
-  return null;
+  const futureTime = new Date(now);
+  futureTime.setHours(now.getHours() + 2);
+  return futureTime;
 }
 
 async function notifyDriver(ride) {
@@ -466,9 +491,6 @@ async function notifyDriver(ride) {
     return;
   }
   
-  const vehicleEmoji = ride.vehicleType === VEHICLE_TYPES.HEAVY ? '🚛' : 
-                       ride.vehicleType === VEHICLE_TYPES.EMERGENCY ? '🚑' : '🚗';
-  
   const notification = `
 🚗 *Nova Corrida Confirmada!*
 
@@ -477,7 +499,6 @@ async function notifyDriver(ride) {
 📍 *Origem:* ${ride.origin.address}
 📍 *Destino:* ${ride.destination.address}
 
-${vehicleEmoji} *Tipo de veículo:* ${ride.vehicleType}
 📏 *Distância até cliente:* ${ride.route.driverToClient.distance} km (${ride.route.driverToClient.duration} min)
 📏 *Distância da corrida:* ${ride.route.clientToDestination.distance} km
 💰 *Valor:* ${ride.price.formatted}

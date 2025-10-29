@@ -15,13 +15,29 @@ export const KEYWORDS = {
     'começar',
     'iniciar'
   ],
+  CANCEL: [
+    "cancelar",
+    "cancela",
+    "desistir",
+    "desisto",
+    "parar",
+    "para",
+    "sair",
+    "voltar",
+    "não quero mais",
+    "nao quero mais",
+    "esquece",
+    "esquecer"
+
+  ]
 };
 
 export const CONVERSATION_STATES = {
   IDLE: 'idle',
   WAITING_ORIGIN: 'waiting_origin',
+  CONFIRMING_ORIGIN: 'confirming_origin',
   WAITING_DESTINATION: 'waiting_destination',
-  WAITING_VEHICLE_TYPE: 'waiting_vehicle_type',
+  CONFIRMING_DESTINATION: 'confirming_destination',
   WAITING_CONFIRMATION: 'waiting_confirmation',
   WAITING_SCHEDULE: 'waiting_schedule',
 };
@@ -35,38 +51,21 @@ export const RIDE_STATUS = {
   CANCELLED: 'cancelled',
 };
 
-export const VEHICLE_TYPES = {
-  NORMAL: 'Carro Normal',
-  HEAVY: 'Veículo Pesado',
-  EMERGENCY: 'Emergência',
-};
-
 export const PRICING = {
   BASE_FARE: 5.0,
-  PRICE_PER_KM: 2.5,
+  PRICE_PER_KM: 3.5,
   MINIMUM_FARE: 10.0,
-  HEAVY_MULTIPLIER: 1.5,
-  EMERGENCY_MULTIPLIER: 1.8,
 };
 
 export const MESSAGES = {
-  WELCOME: 'Olá! Qual é o ponto de partida?',
-  ASK_DESTINATION: 'Ótimo! Agora me informe o destino.',
-  ASK_VEHICLE_TYPE: `🚗 Qual tipo de veículo você precisa?
-
-1️⃣ Carro Normal - Viagens comuns
-2️⃣ Veículo Pesado - Entregas, cargas
-3️⃣ Emergência - Atendimento prioritário
-
-Digite o número ou o nome do tipo.`,
-  PROCESSING: 'Aguarde um momento, estou processando sua solicitação...',
-  CALCULATING_ROUTE: '🗺️ Calculando a melhor rota...',
-  ERROR_GEOCODING: 'Desculpe, não consegui localizar esse endereço. Pode tentar novamente?',
-  ERROR_ROUTING: 'Desculpe, não consegui calcular a rota. Tente novamente.',
-  ERROR_GENERAL: 'Ocorreu um erro ao processar sua solicitação. Por favor, tente novamente.',
-  ASK_SCHEDULE_TIME: '📅 Para quando deseja agendar? (exemplo: "hoje 18:00" ou "amanhã 14:30")',
-  RIDE_CONFIRMED: '✅ Corrida confirmada! O motorista foi notificado.',
-  RIDE_SCHEDULED: '📅 Corrida agendada com sucesso!',
-  RIDE_CANCELLED: '❌ Corrida cancelada. Digite "uber" quando quiser solicitar uma nova corrida.',
-  INVALID_OPTION: 'Opção inválida. Digite "confirmar", "agendar" ou "cancelar".',
+  WELCOME: 'Olá! 👋\n\nQual é o seu ponto de partida?\n\nVocê pode enviar sua localização 📍 ou digitar o endereço.',
+  ASK_DESTINATION: 'Ótimo! Agora me informe o destino.\n\nVocê pode enviar a localização 📍 ou digitar o endereço.',
+  PROCESSING: '⏳ Aguarde um momento, estou processando sua solicitação...',
+  ERROR_GEOCODING: '😕 Desculpe, não consegui localizar esse endereço.\n\nPor favor, tente novamente com mais detalhes (ex: "Rua X, número Y" ou "próximo ao shopping Z").',
+  ERROR_ROUTING: '😕 Desculpe, não consegui calcular a rota.\n\nPor favor, tente novamente.',
+  ASK_SCHEDULE: 'Deseja confirmar a corrida agora ou agendar?\n\nDigite "confirmar" ou "agendar".',
+  RIDE_CONFIRMED: '✅ *Corrida confirmada!*\n\nO motorista foi notificado e em breve estará a caminho! 🚗',
+  RIDE_SCHEDULED: '✅ *Corrida agendada com sucesso!* 📅\n\nVocê receberá um lembrete 1 hora antes.',
+  INVALID_OPTION: '❌ Opção inválida.\n\nPor favor, digite "confirmar", "agendar" ou "cancelar".',
+  CANCELLED: '❌ Sua solicitação de corrida foi cancelada.\n\nSe precisar de algo, é só chamar! 😊',
 };
