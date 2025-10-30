@@ -107,13 +107,21 @@ class GeocodingService {
 
   async getLocationFromIP(ip) {
     try {
-      const response = await axios.get(`https://ipapi.co/${ip}/json/`);
-      return {
-        latitude: response.data.latitude,
-        longitude: response.data.longitude,
-        city: response.data.city,
-        region: response.data.region,
-      };
+      // Usando ip-api.com (gratuito, sem necessidade de API key)
+      const response = await axios.get(`http://ip-api.com/json/${ip}?fields=status,message,country,regionName,city,lat,lon`);
+      
+      if (response.data.status === 'success') {
+        return {
+          latitude: response.data.lat,
+          longitude: response.data.lon,
+          city: response.data.city,
+          region: response.data.regionName,
+          country: response.data.country,
+        };
+      } else {
+        console.error('Erro ao obter localização do IP:', response.data.message);
+        return null;
+      }
     } catch (error) {
       console.error('Erro ao obter localização do IP:', error.message);
       return null;
