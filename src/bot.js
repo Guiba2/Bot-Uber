@@ -5,11 +5,11 @@ import qrcode from 'qrcode-terminal';
 import cron from 'node-cron';
 import axios from 'axios';
 
-import storage from '../../Bot-UberTest/src/utils/storage.js';
-import geocodingService from '../../Bot-UberTest/src/services/geocoding.js';
-import routingService from '../../Bot-UberTest/src/services/routing.js';
-import pricingService from '../../Bot-UberTest/src/services/pricing.js';
-import { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES } from '../../Bot-UberTest/src/config/constants.js';
+import storage from './utils/storage.js';
+import geocodingService from './services/geocoding.js';
+import routingService from './services/routing.js';
+import pricingService from './services/pricing.js';
+import { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES } from './config/constants.js';
 
 import dotenv from 'dotenv';
 dotenv.config();
@@ -22,10 +22,30 @@ async function initializeDriverLocation() {
   
   if (driverIp === 'auto') {
     try {
-      const response = await axios.get('https://api.ipify.org?format=json');
-      const publicIp = response.data.ip;
-      const location = await geocodingService.getLocationFromIP(publicIp);
+      // Obter IP público usando ip-api.com diretamente
+      const response = await axios.get('http://ip-api.com/json/?fields=status,message,country,regionName,city,lat,lon');
       
+      if (response.data.status === 'success') {
+        driverLocation = {
+          latitude: response.data.lat,
+          longitude: response.data.lon,
+          city: response.data.city,
+          region: response.data.regionName,
+          country: response.data.country,
+        };
+        console.log('📍 Localização do motorista obtida via IP:', driverLocation);
+      } else {
+        throw new Error('Localização inválida retornada');
+      }
+    } catch (error) {
+      console.log('⚠️  Não foi possível obter localização automática do motorista');
+      console.log('⚠️  Erro:', error.message);
+      console.log('📍 Usando localização padrão (São Paulo, Brasil)');
+      driverLocation = { latitude: -23.5505, longitude: -46.6333, city: 'São Paulo', region: 'São Paulo', country: 'Brazil' };
+    }
+  } else {
+    try {
+      const location = await geocodingService.getLocationFromIP(driverIp);
       if (location && location.latitude && location.longitude) {
         driverLocation = location;
         console.log('📍 Localização do motorista obtida via IP:', driverLocation);
@@ -33,23 +53,10 @@ async function initializeDriverLocation() {
         throw new Error('Localização inválida retornada');
       }
     } catch (error) {
-      console.log('⚠️  Não foi possível obter localização automática do motorista');
-      console.log('📍 Usando localização padrão (São Paulo, Brasil)');
-      driverLocation = { latitude: -23.5505, longitude: -46.6333, city: 'São Paulo', region: 'SP' };
-    }
-  } else {
-    try {
-      const location = await geocodingService.getLocationFromIP(driverIp);
-      if (location && location.latitude && longitude.longitude) {
-        driverLocation = location;
-        console.log('📍 Localização do motorista obtida via IP:', driverLocation);
-      } else {
-        throw new Error('Localização inválida retornada');
-      }
-    } catch (error) {
       console.log('⚠️  Erro ao obter localização do IP fornecido');
+      console.log('⚠️  Erro:', error.message);
       console.log('📍 Usando localização padrão (São Paulo, Brasil)');
-      driverLocation = { latitude: -23.5505, longitude: -46.6333, city: 'São Paulo', region: 'SP' };
+      driverLocation = { latitude: -23.5505, longitude: -46.6333, city: 'São Paulo', region: 'São Paulo', country: 'Brazil' };
     }
   }
 }
