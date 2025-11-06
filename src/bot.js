@@ -4,6 +4,9 @@ import pino from 'pino';
 import qrcode from 'qrcode-terminal';
 import cron from 'node-cron';
 import axios from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 import storage from './utils/storage.js';
 import geocodingService from './services/geocoding.js';
@@ -13,6 +16,9 @@ import { KEYWORDS, CONVERSATION_STATES, RIDE_STATUS, MESSAGES } from './config/c
 
 import dotenv from 'dotenv';
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 let sock;
 let driverLocation = null;
@@ -58,6 +64,35 @@ async function initializeDriverLocation() {
       console.log('📍 Usando localização padrão (São Paulo, Brasil)');
       driverLocation = { latitude: -23.5505, longitude: -46.6333, city: 'São Paulo', region: 'São Paulo', country: 'Brazil' };
     }
+  }
+}
+
+async function updateDriverLocation() {
+  const driverIp = process.env.DRIVER_IP || 'auto';
+  
+  try {
+    if (driverIp === 'auto') {
+      const response = await axios.get('http://ip-api.com/json/?fields=status,message,country,regionName,city,lat,lon');
+      
+      if (response.data.status === 'success') {
+        driverLocation = {
+          latitude: response.data.lat,
+          longitude: response.data.lon,
+          city: response.data.city,
+          region: response.data.regionName,
+          country: response.data.country,
+        };
+        console.log('🔄 Localização do motorista atualizada:', driverLocation);
+      }
+    } else {
+      const location = await geocodingService.getLocationFromIP(driverIp);
+      if (location && location.latitude && location.longitude) {
+        driverLocation = location;
+        console.log('🔄 Localização do motorista atualizada:', driverLocation);
+      }
+    }
+  } catch (error) {
+    console.log('⚠️  Não foi possível atualizar localização do motorista, mantendo última conhecida');
   }
 }
 
@@ -348,13 +383,18 @@ async function handleDestinationConfirmation(from, messageText) {
   await sendMessage(from, '⏳ Calculando rota...');
   
   try {
+    // Atualizar localização do motorista antes de calcular
+    console.log('🔄 Atualizando localização do motorista...');
+    await updateDriverLocation();
+    
     const routeInfo = await routingService.calculateMultipleRoutes(
       driverLocation,
       originCoords,
       destinationCoords
     );
     
-    const priceInfo = pricingService.getPriceBreakdown(routeInfo.clientToDestination.distance);
+    // Calcular preço pela distância TOTAL (motorista→cliente + cliente→destino)
+    const priceInfo = pricingService.getPriceBreakdown(routeInfo.totalDistance);
     
     storage.setConversationState(from, CONVERSATION_STATES.WAITING_CONFIRMATION, {
       origin,
@@ -364,6 +404,7 @@ async function handleDestinationConfirmation(from, messageText) {
       },
       route: routeInfo,
       price: priceInfo,
+      driverLocationAtRequest: { ...driverLocation }, // Salvar localização do motorista
     });
     
     const summary = `✅ *Destino confirmado!*\n\n📊 *Resumo da Corrida*
@@ -371,9 +412,20 @@ async function handleDestinationConfirmation(from, messageText) {
 📍 *Origem:* ${origin.address}
 📍 *Destino:* ${selectedLocation.formattedAddress}
 
-📏 *Distância:* ${routeInfo.clientToDestination.distance} km
-⏱️ *Tempo estimado:* ${routeInfo.clientToDestination.duration} minutos
-💰 *Valor:* ${priceInfo.formatted}
+🚗 *Localização do Motorista:*
+   ${driverLocation.city}, ${driverLocation.region}
+   _(atualizado agora)_
+
+📏 *Distância do motorista até você:* ${routeInfo.driverToClient.distance} km
+⏱️ *Tempo do motorista até você:* ${routeInfo.driverToClient.duration} minutos
+
+📏 *Distância da corrida:* ${routeInfo.clientToDestination.distance} km
+⏱️ *Tempo estimado da corrida:* ${routeInfo.clientToDestination.duration} minutos
+
+📏 *Distância total:* ${routeInfo.totalDistance} km
+💰 *Valor total:* ${priceInfo.formatted}
+
+_💡 O valor inclui o deslocamento do motorista até você._
 
 *Escolha uma opção:*
 • Digite *"confirmar"* para solicitar agora
@@ -400,6 +452,7 @@ async function handleConfirmation(from, messageText) {
       route: conversationState.data.route,
       price: conversationState.data.price,
       status: RIDE_STATUS.CONFIRMED,
+      driverLocationAtRequest: conversationState.data.driverLocationAtRequest,
     });
     
     await sendMessage(from, MESSAGES.RIDE_CONFIRMED);
@@ -431,6 +484,7 @@ async function handleSchedule(from, messageText) {
     status: RIDE_STATUS.SCHEDULED,
     scheduledFor: messageText,
     scheduledTime: scheduledTime,
+    driverLocationAtRequest: conversationState.data.driverLocationAtRequest,
   });
   
   storage.addScheduledRide(from, {
@@ -439,6 +493,7 @@ async function handleSchedule(from, messageText) {
     destination: conversationState.data.destination,
     route: conversationState.data.route,
     price: conversationState.data.price,
+    driverLocationAtRequest: conversationState.data.driverLocationAtRequest,
   }, scheduledTime);
   
   await sendMessage(from, `${MESSAGES.RIDE_SCHEDULED}\n\n📅 Data/Hora: ${messageText}`);
@@ -498,6 +553,8 @@ async function notifyDriver(ride) {
     return;
   }
   
+  const driverLocationInfo = ride.driverLocationAtRequest || driverLocation;
+  
   const notification = `
 🚗 *Nova Corrida Confirmada!*
 
@@ -506,9 +563,17 @@ async function notifyDriver(ride) {
 📍 *Origem:* ${ride.origin.address}
 📍 *Destino:* ${ride.destination.address}
 
+🚗 *Sua localização na hora da solicitação:*
+   ${driverLocationInfo.city}, ${driverLocationInfo.region}
+   Lat: ${driverLocationInfo.latitude.toFixed(4)}
+   Lon: ${driverLocationInfo.longitude.toFixed(4)}
+
 📏 *Distância até cliente:* ${ride.route.driverToClient.distance} km (${ride.route.driverToClient.duration} min)
 📏 *Distância da corrida:* ${ride.route.clientToDestination.distance} km
-💰 *Valor:* ${ride.price.formatted}
+📏 *Distância total:* ${ride.route.totalDistance} km
+
+💰 *Valor total:* ${ride.price.formatted}
+   _Inclui deslocamento até o cliente_
 
 🆔 Corrida #${ride.id}
   `.trim();

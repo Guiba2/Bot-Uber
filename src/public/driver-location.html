@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Localização do Motorista - Bot Uber</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 30px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 14px;
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .status.waiting {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .status.active {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status.error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .location-info {
+            background: #f9fafb;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .location-info.show {
+            display: block;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .info-value {
+            color: #111827;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-bottom: 10px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #dc2626;
+        }
+
+        .accuracy-indicator {
+            text-align: center;
+            padding: 10px;
+            background: #f3f4f6;
+            border-radius: 8px;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        .accuracy-good {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .accuracy-medium {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .accuracy-poor {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .icon {
+            font-size: 48px;
+            margin-bottom: 15px;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        .pulsing {
+            animation: pulse 2s ease-in-out infinite;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="icon">🚗</div>
+            <h1>Painel do Motorista</h1>
+            <p>Compartilhe sua localização em tempo real</p>
+        </div>
+
+        <div id="status" class="status waiting">
+            ⏳ Aguardando permissão de localização...
+        </div>
+
+        <div id="locationInfo" class="location-info">
+            <div class="info-row">
+                <span class="info-label">📍 Latitude:</span>
+                <span id="latitude" class="info-value">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">📍 Longitude:</span>
+                <span id="longitude" class="info-value">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">🏙️ Cidade:</span>
+                <span id="city" class="info-value">Carregando...</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">📊 Precisão:</span>
+                <span id="accuracy" class="info-value">-</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">🕐 Última atualização:</span>
+                <span id="lastUpdate" class="info-value">-</span>
+            </div>
+            <div id="accuracyIndicator" class="accuracy-indicator">
+                Calculando precisão...
+            </div>
+        </div>
+
+        <button id="startBtn" class="btn btn-primary" onclick="startTracking()">
+            📍 Iniciar Rastreamento
+        </button>
+        <button id="stopBtn" class="btn btn-danger" style="display: none;" onclick="stopTracking()">
+            ⏹️ Parar Rastreamento
+        </button>
+    </div>
+
+    <script>
+        let watchId = null;
+        let isTracking = false;
+        const API_URL = 'http://localhost:3000'; // URL do servidor
+
+        function updateStatus(message, type) {
+            const statusEl = document.getElementById('status');
+            statusEl.textContent = message;
+            statusEl.className = `status ${type}`;
+        }
+
+        function updateAccuracyIndicator(accuracy) {
+            const indicator = document.getElementById('accuracyIndicator');
+            
+            if (accuracy < 20) {
+                indicator.textContent = '✅ Excelente precisão (GPS ativo)';
+                indicator.className = 'accuracy-indicator accuracy-good';
+            } else if (accuracy < 100) {
+                indicator.textContent = '⚠️ Precisão média';
+                indicator.className = 'accuracy-indicator accuracy-medium';
+            } else {
+                indicator.textContent = '❌ Precisão baixa (use GPS ao ar livre)';
+                indicator.className = 'accuracy-indicator accuracy-poor';
+            }
+        }
+
+        async function reverseGeocode(lat, lon) {
+            try {
+                const response = await fetch(`http://ip-api.com/json/?fields=status,country,regionName,city&lat=${lat}&lon=${lon}`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    return `${data.city}, ${data.regionName}`;
+                }
+                return 'Desconhecido';
+            } catch (error) {
+                console.error('Erro ao obter cidade:', error);
+                return 'Erro ao obter';
+            }
+        }
+
+        async function sendLocationToServer(position) {
+            try {
+                const response = await fetch(`${API_URL}/update-driver-location`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: position.coords.accuracy,
+                        timestamp: new Date().toISOString()
+                    })
+                });
+
+                if (!response.ok) {
+                    console.error('Erro ao enviar localização para o servidor');
+                }
+            } catch (error) {
+                console.error('Erro ao conectar com servidor:', error);
+            }
+        }
+
+        function startTracking() {
+            if (isTracking) return;
+
+            if (!navigator.geolocation) {
+                updateStatus('❌ Geolocalização não suportada pelo navegador', 'error');
+                return;
+            }
+
+            updateStatus('🔄 Obtendo localização com alta precisão...', 'waiting');
+            document.getElementById('startBtn').disabled = true;
+
+            const options = {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            };
+
+            watchId = navigator.geolocation.watchPosition(
+                async (position) => {
+                    isTracking = true;
+                    document.getElementById('startBtn').style.display = 'none';
+                    document.getElementById('stopBtn').style.display = 'block';
+                    document.getElementById('locationInfo').classList.add('show');
+                    
+                    updateStatus('✅ Localização ativa e sendo atualizada', 'active');
+
+                    // Atualizar informações na tela
+                    document.getElementById('latitude').textContent = position.coords.latitude.toFixed(6);
+                    document.getElementById('longitude').textContent = position.coords.longitude.toFixed(6);
+                    document.getElementById('accuracy').textContent = `${Math.round(position.coords.accuracy)}m`;
+                    document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('pt-BR');
+                    
+                    updateAccuracyIndicator(position.coords.accuracy);
+
+                    // Obter cidade
+                    const city = await reverseGeocode(position.coords.latitude, position.coords.longitude);
+                    document.getElementById('city').textContent = city;
+
+                    // Enviar para o servidor
+                    await sendLocationToServer(position);
+
+                    console.log('📍 Localização atualizada:', {
+                        lat: position.coords.latitude,
+                        lon: position.coords.longitude,
+                        accuracy: position.coords.accuracy
+                    });
+                },
+                (error) => {
+                    let message = '';
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            message = '❌ Permissão de localização negada';
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            message = '❌ Localização indisponível';
+                            break;
+                        case error.TIMEOUT:
+                            message = '❌ Tempo esgotado ao obter localização';
+                            break;
+                        default:
+                            message = '❌ Erro desconhecido ao obter localização';
+                    }
+                    updateStatus(message, 'error');
+                    document.getElementById('startBtn').disabled = false;
+                    console.error('Erro de geolocalização:', error);
+                },
+                options
+            );
+        }
+
+        function stopTracking() {
+            if (watchId !== null) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+                isTracking = false;
+            }
+
+            updateStatus('⏸️ Rastreamento pausado', 'waiting');
+            document.getElementById('startBtn').style.display = 'block';
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').style.display = 'none';
+        }
+
+        // Auto-iniciar se já tiver permissão
+        window.addEventListener('load', () => {
+            if (navigator.permissions) {
+                navigator.permissions.query({name: 'geolocation'}).then((result) => {
+                    if (result.state === 'granted') {
+                        updateStatus('✅ Permissão concedida! Clique para iniciar', 'active');
+                    }
+                });
+            }
+        });
+    </script>
+</body>
+</html>
